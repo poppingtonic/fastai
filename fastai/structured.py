@@ -457,4 +457,3 @@ def get_nn_mappers(df, cat_vars, contin_vars):
     cat_maps = [(o, LabelEncoder()) for o in cat_vars]
     contin_maps = [([o], StandardScaler()) for o in contin_vars]
     return DataFrameMapper(cat_maps).fit(df), DataFrameMapper(contin_maps).fit(df)
-

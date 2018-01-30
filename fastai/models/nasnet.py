@@ -7,7 +7,7 @@ from torch.autograd import Variable
 pretrained_settings = {
     'nasnetalarge': {
         'imagenet': {
-            'url': 'http://webia.lip6.fr/~cadene/Downloads/pretrained-models.pytorch/nasnetalarge-dc8c1432.pth',
+            'url': 'http://data.lip6.fr/cadene/pretrainedmodels/nasnetalarge-a1897284.pth',
             'input_space': 'RGB',
             'input_size': [3, 331, 331], # resize 354
             'input_range': [0, 1],
@@ -16,7 +16,7 @@ pretrained_settings = {
             'num_classes': 1000
         },
         'imagenet+background': {
-            'url': 'http://webia.lip6.fr/~cadene/Downloads/pretrained-models.pytorch/nasnetalarge-dc8c1432.pth',
+            'url': 'http://data.lip6.fr/cadene/pretrainedmodels/nasnetalarge-a1897284.pth',
             'input_space': 'RGB',
             'input_size': [3, 331, 331], # resize 354
             'input_range': [0, 1],
@@ -377,7 +377,7 @@ class NormalCell(nn.Module):
 class ReductionCell0(nn.Module):
 
     def __init__(self, in_channels_left, out_channels_left, in_channels_right, out_channels_right):
-        super(ReductionCell0, self).__init__() 
+        super(ReductionCell0, self).__init__()
         self.conv_prev_1x1 = nn.Sequential()
         self.conv_prev_1x1.add_module('relu', nn.ReLU())
         self.conv_prev_1x1.add_module('conv', nn.Conv2d(in_channels_left, out_channels_left, 1, stride=1, bias=False))
@@ -545,7 +545,7 @@ class NASNetALarge(nn.Module):
 
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout()
-        self.linear = nn.Linear(4032, self.num_classes)
+        self.last_linear = nn.Linear(4032, self.num_classes)
 
     def features(self, x):
         x_conv0 = self.conv0(x)
@@ -582,7 +582,7 @@ class NASNetALarge(nn.Module):
         x = F.adaptive_max_pool2d(x, 1)
         x = x.view(x.size(0), -1)
         x = self.dropout(x)
-        return F.log_softmax(self.linear(x))
+        return F.log_softmax(self.last_linear(x))
 
     def forward(self, x):
         x = self.features(x)
@@ -604,10 +604,10 @@ def nasnetalarge(use_classifer=False, num_classes=1000, pretrained='imagenet'):
         model.load_state_dict(model_zoo.load_url(settings['url']))
 
         if pretrained == 'imagenet':
-            new_linear = nn.Linear(model.linear.in_features, 1000)
-            new_linear.weight.data = model.linear.weight.data[1:]
-            new_linear.bias.data = model.linear.bias.data[1:]
-            model.linear = new_linear
+            new_linear = nn.Linear(model.last_linear.in_features, 1000)
+            new_linear.weight.data = model.last_linear.weight.data[1:]
+            new_linear.bias.data = model.last_linear.bias.data[1:]
+            model.last_linear = new_linear
 
         model.input_space = settings['input_space']
         model.input_size = settings['input_size']
@@ -618,4 +618,3 @@ def nasnetalarge(use_classifer=False, num_classes=1000, pretrained='imagenet'):
     else:
         model = NASNetALarge(num_classes=num_classes)
     return model
-
