@@ -17,6 +17,7 @@ from .models.wrn_50_2f import wrn_50_2f
 from .models.inceptionresnetv2 import InceptionResnetV2
 from .models.inceptionv4 import InceptionV4
 from .models.nasnet import nasnetalarge
+from .models.xception import xception
 
 import warnings
 warnings.filterwarnings('ignore', message='Implicit dimension choice', category=UserWarning)
@@ -37,6 +38,7 @@ def inceptionresnet_2(pre): return load_pre(pre, InceptionResnetV2, 'inceptionre
 def resnext50(pre): return load_pre(pre, resnext_50_32x4d, 'resnext_50_32x4d')
 def resnext101(pre): return load_pre(pre, resnext_101_32x4d, 'resnext_101_32x4d')
 def resnext101_64(pre): return load_pre(pre, resnext_101_64x4d, 'resnext_101_64x4d')
+def xception_pre(pre): return load_pre(pre, xception, 'xception-b0b7af25')
 def wrn(pre): return load_pre(pre, wrn_50_2f, 'wrn_50_2f')
 def dn121(pre): return children(densenet121(pre))[0]
 def dn161(pre): return children(densenet161(pre))[0]
@@ -44,4 +46,3 @@ def dn169(pre): return children(densenet169(pre))[0]
 def dn201(pre): return children(densenet201(pre))[0]
 def vgg16(pre): return children(vgg16_bn(pre))[0]
 def vgg19(pre): return children(vgg19_bn(pre))[0]
-
