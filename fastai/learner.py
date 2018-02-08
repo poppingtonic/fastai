@@ -12,14 +12,6 @@ from .losses import *
 import time
 
 
-class BasicModel():
-    def __init__(self,model,name='unnamed'): self.model,self.name = model,name
-    def get_layer_groups(self, do_fc=False): return children(self.model)
-
-class SingleModel(BasicModel):
-    def get_layer_groups(self): return [self.model]
-
-
 class Learner():
     def __init__(self, data, models, opt_fn=None, tmp_name='tmp', models_name='models', metrics=None, clip=None):
         self.data_,self.models,self.metrics = data,models,metrics
@@ -31,7 +23,7 @@ class Learner():
         self.models_path = os.path.join(self.data.path, models_name)
         os.makedirs(self.tmp_path, exist_ok=True)
         os.makedirs(self.models_path, exist_ok=True)
-        self.crit,self.reg_fn,self.crit = None,None,None
+        self.crit,self.reg_fn = None,None
 
     @classmethod
     def from_model_data(cls, m, data):
@@ -81,7 +73,8 @@ class Learner():
     def load_cycle(self, name, cycle): self.load(f'{name}_cyc_{cycle}')
 
     def fit_gen(self, model, data, layer_opt, n_cycle, cycle_len=None, cycle_mult=1, cycle_save_name=None,
-                metrics=None, callbacks=None, use_wd_sched=False, **kwargs):
+                use_clr=None, metrics=None, callbacks=None, use_wd_sched=False, norm_wds=False, wds_sched_mult=None, **kwargs):
+
         """Method does some preparation before finally delegating to the 'fit' method for
         fitting the model. Namely, if cycle_len is defined, it adds a 'Cosine Annealing'
         scheduler for varying the learning rate across iterations.
@@ -113,6 +106,20 @@ class Learner():
 
             callbacks (list(Callback)): callbacks to apply during the training.
 
+            use_wd_sched (bool, optional): set to True to enable weight regularization using
+                the technique mentioned in https://arxiv.org/abs/1711.05101. When this is True
+                alone (see below), the regularization is detached from gradient update and
+                applied directly to the weights.
+
+            norm_wds (bool, optional): when this is set to True along with use_wd_sched, the
+                regularization factor is normalized with each training cycle.
+
+            wds_sched_mult (function, optional): when this is provided along with use_wd_sched
+                as True, the value computed by this function is multiplied with the regularization
+                strength. This function is passed the WeightDecaySchedule object. And example
+                function that can be passed is:
+                            f = lambda x: np.array(x.layer_opt.lrs) / x.init_lrs
+
             kwargs: other optional arguments
 
         Returns:
@@ -130,18 +137,22 @@ class Learner():
                       'pass weight decay values.')
             batch_per_epoch = len(data.trn_dl)
             cl = cycle_len if cycle_len else 1
-            self.wd_sched = WeightDecaySchedule(layer_opt, batch_per_epoch, cl, cycle_mult, n_cycle)
+            self.wd_sched = WeightDecaySchedule(layer_opt, batch_per_epoch, cl, cycle_mult, n_cycle,
+                                                norm_wds, wds_sched_mult)
             callbacks += [self.wd_sched]
 
-        if cycle_len:
+        elif use_clr is not None:
+            clr_div,cut_div = use_clr
+            cycle_end = self.get_cycle_end(cycle_save_name)
+            self.sched = CircularLR(layer_opt, len(data.trn_dl)*cycle_len, on_cycle_end=cycle_end, div=clr_div, cut_div=cut_div)
+        elif cycle_len:
             cycle_end = self.get_cycle_end(cycle_save_name)
             cycle_batches = len(data.trn_dl)*cycle_len
             self.sched = CosAnneal(layer_opt, cycle_batches, on_cycle_end=cycle_end, cycle_mult=cycle_mult)
         elif not self.sched: self.sched=LossRecorder(layer_opt)
         callbacks+=[self.sched]
-        for cb in callbacks: cb.on_train_begin()
         n_epoch = sum_geom(cycle_len if cycle_len else 1, cycle_mult, n_cycle)
-        fit(model, data, n_epoch, layer_opt.opt, self.crit,
+        return fit(model, data, n_epoch, layer_opt.opt, self.crit,
             metrics=metrics, callbacks=callbacks, reg_fn=self.reg_fn, clip=self.clip, **kwargs)
 
     def get_layer_groups(self): return self.models.get_layer_groups()
@@ -195,9 +206,14 @@ class Learner():
         """
         self.sched = None
         layer_opt = self.get_layer_opt(lrs, wds)
-        self.fit_gen(self.model, self.data, layer_opt, n_cycle, **kwargs)
+        return self.fit_gen(self.model, self.data, layer_opt, n_cycle, **kwargs)
 
-    def lr_find(self, start_lr=1e-5, end_lr=10, wds=None):
+    def warm_up(self, lr, wds=None):
+        layer_opt = self.get_layer_opt(lr/4, wds)
+        self.sched = LR_Finder(layer_opt, len(self.data.trn_dl), lr, linear=True)
+        return self.fit_gen(self.model, self.data, layer_opt, 1)
+
+    def lr_find(self, start_lr=1e-5, end_lr=10, wds=None, linear=False):
         """Helps you find an optimal learning rate for a model.
 
          It uses the technique developed in the 2015 paper
@@ -232,7 +248,7 @@ class Learner():
         """
         self.save('tmp')
         layer_opt = self.get_layer_opt(start_lr, wds)
-        self.sched = LR_Finder(layer_opt, len(self.data.trn_dl), end_lr)
+        self.sched = LR_Finder(layer_opt, len(self.data.trn_dl), end_lr, linear=linear)
         self.fit_gen(self.model, self.data, layer_opt, 1)
         self.load('tmp')
 

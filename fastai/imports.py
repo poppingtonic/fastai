@@ -1,6 +1,6 @@
 from IPython.lib.deepreload import reload as dreload
 import PIL, os, numpy as np, math, collections, threading, json, bcolz, random, scipy, cv2
-import random, pandas as pd, pickle, sys, itertools, string, sys, re, datetime, time
+import random, pandas as pd, pickle, sys, itertools, string, sys, re, datetime, time, shutil
 import seaborn as sns, matplotlib
 import IPython, graphviz, sklearn_pandas, sklearn, warnings
 from abc import abstractmethod
@@ -21,17 +21,26 @@ from ipywidgets import interact, interactive, fixed, widgets
 matplotlib.rc('animation', html='html5')
 np.set_printoptions(precision=5, linewidth=110, suppress=True)
 
-def in_notebook(): return 'ipykernel' in sys.modules
+from ipykernel.kernelapp import IPKernelApp
+def in_notebook(): return IPKernelApp.initialized()
 
 import tqdm as tq
 from tqdm import tqdm_notebook, tnrange
+
+def clear_tqdm():
+    inst = getattr(tq.tqdm, '_instances', None)
+    if not inst: return
+    for i in range(len(inst)): inst.pop().close()
+
 if in_notebook():
-    def tqdm(*args, **kwargs): return tq.tqdm(*args, file=sys.stdout, **kwargs)
-    def trange(*args, **kwargs): return tq.trange(*args, file=sys.stdout, **kwargs)
+    def tqdm(*args, **kwargs):
+        clear_tqdm()
+        return tq.tqdm(*args, file=sys.stdout, **kwargs)
+    def trange(*args, **kwargs):
+        clear_tqdm()
+        return tq.trange(*args, file=sys.stdout, **kwargs)
 else:
     from tqdm import tqdm, trange
     tnrange=trange
     tqdm_notebook=tqdm
-
-#cv2.setNumThreads(0)
 
