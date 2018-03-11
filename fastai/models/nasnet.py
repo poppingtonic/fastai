@@ -590,7 +590,7 @@ class NASNetALarge(nn.Module):
         return x
 
 
-def nasnetalarge(use_classifer=False, num_classes=1000, pretrained='imagenet'):
+def nasnetalarge(num_classes=1000, pretrained='imagenet'):
     r"""NASNetALarge model architecture from the
     `"NASNet" <https://arxiv.org/abs/1707.07012>`_ paper.
     """
@@ -604,10 +604,10 @@ def nasnetalarge(use_classifer=False, num_classes=1000, pretrained='imagenet'):
         model.load_state_dict(model_zoo.load_url(settings['url']))
 
         if pretrained == 'imagenet':
-            new_linear = nn.Linear(model.last_linear.in_features, 1000)
-            new_linear.weight.data = model.last_linear.weight.data[1:]
-            new_linear.bias.data = model.last_linear.bias.data[1:]
-            model.last_linear = new_linear
+            new_last_linear = nn.Linear(model.last_linear.in_features, 1000)
+            new_last_linear.weight.data = model.last_linear.weight.data[1:]
+            new_last_linear.bias.data = model.last_linear.bias.data[1:]
+            model.last_linear = new_last_linear
 
         model.input_space = settings['input_space']
         model.input_size = settings['input_size']
