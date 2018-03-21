@@ -27,7 +27,7 @@ def resize_img(fname, targ, path, new_path):
 def resize_imgs(fnames, targ, path, new_path):
     if not os.path.exists(os.path.join(path,new_path,str(targ),fnames[0])):
         with ThreadPoolExecutor(8) as e:
-            ims = e.map(lambda x: resize_img(x, targ, path, 'tmp'), fnames)
+            ims = e.map(lambda x: resize_img(x, targ, path, new_path), fnames)
             for x in tqdm(ims, total=len(fnames), leave=False): pass
     return os.path.join(path,new_path,str(targ))
 
@@ -43,7 +43,7 @@ def read_dirs(path, folder):
     labels, filenames, all_labels = [], [], []
     full_path = os.path.join(path, folder)
     for label in sorted(os.listdir(full_path)):
-        if label not in ('.ipynb_checkpoints'):
+        if label not in ('.ipynb_checkpoints','.DS_Store'):
             all_labels.append(label)
             for fname in os.listdir(os.path.join(full_path, label)):
                 filenames.append(os.path.join(folder, label, fname))
@@ -100,7 +100,7 @@ def folder_source(path, folder):
     label_arr = np.array(idxs, dtype=int)
     return fnames, label_arr, all_labels
 
-def parse_csv_labels(fn, skip_header=True):
+def parse_csv_labels(fn, skip_header=True, cat_separator = ' '):
     """Parse filenames and label sets from a CSV file.
 
     This method expects that the csv file at path :fn: has two columns. If it
@@ -120,6 +120,7 @@ def parse_csv_labels(fn, skip_header=True):
             be one-hot encoded.
         )
     .
+    :param cat_separator: the separator for the categories column
     """
     with open(fn) as fileobj:
         reader = csv.reader(fileobj)
@@ -129,7 +130,7 @@ def parse_csv_labels(fn, skip_header=True):
         csv_lines = [l for l in reader]
 
     fnames = [fname for fname, _ in csv_lines]
-    csv_labels = {a:b.split(' ') for a,b in csv_lines}
+    csv_labels = {a:b.split(cat_separator) for a,b in csv_lines}
     return sorted(fnames), csv_labels
 
 def nhot_labels(label2idx, csv_labels, fnames, c):
@@ -155,6 +156,7 @@ def dict_source(folder, fnames, csv_labels, suffix='', continuous=False):
     return full_names, label_arr, all_labels
 
 class BaseDataset(Dataset):
+    """An abstract class representing a fastai dataset, it extends torch.utils.data.Dataset."""
     def __init__(self, transform=None):
         self.transform = transform
         self.n = self.get_n()
@@ -171,19 +173,39 @@ class BaseDataset(Dataset):
         return (x,y) if tfm is None else tfm(x,y)
 
     @abstractmethod
-    def get_n(self): raise NotImplementedError
+    def get_n(self):
+        """Return number of elements in the dataset == len(self)."""
+        raise NotImplementedError
+
     @abstractmethod
-    def get_c(self): raise NotImplementedError
+    def get_c(self):
+        """Return number of classes in a dataset."""
+        raise NotImplementedError
+
     @abstractmethod
-    def get_sz(self): raise NotImplementedError
+    def get_sz(self):
+        """Return maximum size of an image in a dataset."""
+        raise NotImplementedError
+
     @abstractmethod
-    def get_x(self, i): raise NotImplementedError
+    def get_x(self, i):
+        """Return i-th example (image, wav, etc)."""
+        raise NotImplementedError
+
     @abstractmethod
-    def get_y(self, i): raise NotImplementedError
+    def get_y(self, i):
+        """Return i-th label."""
+        raise NotImplementedError
+
     @property
-    def is_multi(self): return False
+    def is_multi(self):
+        """Returns true if this data set contains multiple labels per sample."""
+        return False
+
     @property
-    def is_reg(self): return False
+    def is_reg(self):
+        """True if the data set is used to train regression models."""
+        return False
 
 def open_image(fn):
     """ Opens an image using OpenCV given the file path.
@@ -192,7 +214,7 @@ def open_image(fn):
         fn: the file path of the image
 
     Returns:
-        The numpy array representation of the image in the RGB format
+        The image in RGB format as numpy array of floats normalized to range between 0.0 - 1.0
     """
     flags = cv2.IMREAD_UNCHANGED+cv2.IMREAD_ANYDEPTH+cv2.IMREAD_ANYCOLOR
     if not os.path.exists(fn):
@@ -201,7 +223,9 @@ def open_image(fn):
         raise OSError('Is a directory: {}'.format(fn))
     else:
         try:
-            return cv2.cvtColor(cv2.imread(str(fn), flags), cv2.COLOR_BGR2RGB).astype(np.float32)/255
+            im = cv2.imread(str(fn), flags).astype(np.float32)/255
+            if im is None: raise OSError(f'File not recognized by opencv: {fn}')
+            return cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         except Exception as e:
             raise OSError('Error handling image at: {}'.format(fn)) from e
 
@@ -209,9 +233,9 @@ class FilesDataset(BaseDataset):
     def __init__(self, fnames, transform, path):
         self.path,self.fnames = path,fnames
         super().__init__(transform)
-    def get_n(self): return len(self.y)
     def get_sz(self): return self.transform.sz
     def get_x(self, i): return open_image(os.path.join(self.path, self.fnames[i]))
+    def get_n(self): return len(self.fnames)
 
     def resize_imgs(self, targ, new_path):
         dest = resize_imgs(self.fnames, targ, self.path, new_path)
@@ -227,6 +251,7 @@ class FilesDataset(BaseDataset):
         if len(arr.shape)==3: arr = arr[None]
         return self.transform.denorm(np.rollaxis(arr,1,4))
 
+
 class FilesArrayDataset(FilesDataset):
     def __init__(self, fnames, y, transform, path):
         self.y=y
@@ -235,7 +260,6 @@ class FilesArrayDataset(FilesDataset):
     def get_y(self, i): return self.y[i]
     def get_c(self):
         return self.y.shape[1] if len(self.y.shape)>1 else 0
-
 
 class FilesIndexArrayDataset(FilesArrayDataset):
     def get_c(self): return int(self.y.max())+1
@@ -277,8 +301,8 @@ class ModelData():
 
     @classmethod
     def from_dls(cls, path,trn_dl,val_dl,test_dl=None):
-        trn_dl,val_dl = DataLoader(trn_dl),DataLoader(val_dl)
-        if test_dl: test_dl = DataLoader(test_dl)
+        #trn_dl,val_dl = DataLoader(trn_dl),DataLoader(val_dl)
+        #if test_dl: test_dl = DataLoader(test_dl)
         return cls(path, trn_dl, val_dl, test_dl)
 
     @property
@@ -319,13 +343,13 @@ class ImageData(ModelData):
     def resized(self, dl, targ, new_path):
         return dl.dataset.resize_imgs(targ,new_path) if dl else None
 
-    def resize(self, targ, new_path):
+    def resize(self, targ_sz, new_path='tmp'):
         new_ds = []
         dls = [self.trn_dl,self.val_dl,self.fix_dl,self.aug_dl]
         if self.test_dl: dls += [self.test_dl, self.test_aug_dl]
         else: dls += [None,None]
         t = tqdm_notebook(dls)
-        for dl in t: new_ds.append(self.resized(dl, targ, new_path))
+        for dl in t: new_ds.append(self.resized(dl, targ_sz, new_path))
         t.close()
         return self.__class__(new_ds[0].path, new_ds, self.bs, self.num_workers, self.classes)
 
@@ -392,8 +416,7 @@ class ImageClassifierData(ImageData):
         Returns:
             ImageClassifierData
         """
-        assert isinstance(tfms[0], Transforms) and isinstance(tfms[1], Transforms), \
-            "please provide transformations for your train and validation sets"
+        assert not(tfms[0] is None or tfms[1] is None), "please provide transformations for your train and validation sets"
         trn,val = [folder_source(path, o) for o in (trn_name, val_name)]
         if test_name:
             test = folder_source(path, test_name) if test_with_labels else read_dir(path, test_name)
@@ -446,6 +469,16 @@ class ImageClassifierData(ImageData):
         return cls(path, datasets, bs, num_workers, classes=classes)
 
 def split_by_idx(idxs, *a):
+    """
+    Split each array passed as *a, to a pair of arrays like this (elements selected by idxs,  the remaining elements)
+    This can be used to split multiple arrays containing training data to validation and training set.
+
+    :param idxs [int]: list of indexes selected
+    :param a list: list of np.array, each array should have same amount of elements in the first dimension
+    :return: list of tuples, each containing a split of corresponding array from *a.
+            First element of each tuple is an array composed from elements selected by idxs,
+            second element is an array of remaining elements.
+    """
     mask = np.zeros(len(a[0]),dtype=bool)
     mask[np.array(idxs)] = True
     return [(o[mask],o[~mask]) for o in a]
