@@ -71,7 +71,6 @@ class ColumnarModelData(ModelData):
     def from_data_frame(cls, path, val_idxs, df, y, cat_flds, bs, is_reg=True, is_multi=False, test_df=None):
         ((val_df, trn_df), (val_y, trn_y)) = split_by_idx(val_idxs, df, y)
         return cls.from_data_frames(path, trn_df, val_df, trn_y, val_y, cat_flds, bs, is_reg, is_multi, test_df=test_df)
-
     def get_learner(self, emb_szs, n_cont, emb_drop, out_sz, szs, drops,
                     y_range=None, use_bn=False, **kwargs):
         model = MixedInputModel(emb_szs, n_cont, emb_drop, out_sz, szs, drops, y_range, use_bn, self.is_reg, self.is_multi)
@@ -85,6 +84,17 @@ def emb_init(x):
 
 
 class MixedInputModel(nn.Module):
+    """Class representing a structured dataset with continuous + categorical inputs (hence mixed)
+    Arguments:
+        emb_szs: A list of tuples mapping the cardinality of each categorical variable, with the size of its embedding matrix.
+        n_cont: number of continuous variables.
+        emb_drop: dropout applied uniformly to all embedding matrices.
+        out_sz: Size of the output layer
+        szs: size of fully connected layers
+        drops: dropout values to use for each of the fully connected layers
+        y_range: a tuple representing the minimum and maximum values of the dependent variable
+        use_bn: Whether or not to use batch normalization
+    """
     def __init__(self, emb_szs, n_cont, emb_drop, out_sz, szs, drops,
                  y_range=None, use_bn=False, is_reg=True, is_multi=False):
         super().__init__()
@@ -92,7 +102,7 @@ class MixedInputModel(nn.Module):
         for emb in self.embs: emb_init(emb)
         n_emb = sum(e.embedding_dim for e in self.embs)
         self.n_emb, self.n_cont=n_emb, n_cont
-        
+
         szs = [n_emb+n_cont] + szs
         self.lins = nn.ModuleList([
             nn.Linear(szs[i], szs[i+1]) for i in range(len(szs)-1)])
@@ -110,6 +120,8 @@ class MixedInputModel(nn.Module):
         self.is_multi = is_multi
 
     def forward(self, x_cat, x_cont):
+        """accepts 2 input variables, and outputs a Variable of output data
+        """
         if self.n_emb != 0:
             x = [e(x_cat[:,i]) for i,e in enumerate(self.embs)]
             x = torch.cat(x, 1)
@@ -216,4 +228,3 @@ class CollabFilterLearner(Learner):
 
 class CollabFilterModel(BasicModel):
     def get_layer_groups(self): return self.model
-
