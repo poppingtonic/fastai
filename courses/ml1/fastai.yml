@@ -1,0 +1,9 @@
+version: 1
+experiments:
+    fastai:
+        framework: fastai
+        hardware:
+            gpu: k80
+            spot: true
+        command:
+            - run
